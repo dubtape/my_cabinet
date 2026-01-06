@@ -1,0 +1,21 @@
+{
+  "name": "my_cabinet",
+  "version": "1.0.0",
+  "description": "内阁式多模型议事 Web 应用 MVP",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "cabinet",
+    "llm",
+    "mvp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {},
+  "devDependencies": {}
+}
