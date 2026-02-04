@@ -1,21 +1,28 @@
 {
-  "name": "my_cabinet",
-  "version": "1.0.0",
-  "description": "内阁式多模型议事 Web 应用 MVP",
-  "main": "index.js",
+  "name": "cyber-cabinet",
+  "version": "2.0.0",
+  "description": "赛博内阁 - AI Multi-Agent Decision System",
   "scripts": {
-    "dev": "node server/index.js",
-    "start": "node server/index.js",
-    "test": "node --test"
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start",
+    "migrate": "node scripts/migrateData.js",
+    "test": "npm run test:backend",
+    "test:backend": "cd backend && npm test"
   },
   "keywords": [
     "cabinet",
     "llm",
-    "mvp"
+    "ai",
+    "multi-agent",
+    "decision-making"
   ],
   "author": "",
   "license": "MIT",
   "type": "module",
-  "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
 }

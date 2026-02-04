@@ -1,0 +1,81 @@
+{
+  "meetings": [
+    {
+      "id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "title": "会议-20260106-1222",
+      "issue_text": "test issue",
+      "mode": "QUICK",
+      "status": "CREATED",
+      "budget_max_total_tokens": 12000,
+      "budget_max_cost_usd": null,
+      "budget_per_role_max_output_tokens": 500,
+      "budget_prime_max_output_tokens": 800,
+      "budget_clerk_max_output_tokens": 350,
+      "created_at": "2026-01-06T04:22:48.422Z",
+      "updated_at": "2026-01-06T04:22:48.422Z",
+      "usage_total_tokens": 0,
+      "usage_cost_usd": 0,
+      "degrade_notes": []
+    }
+  ],
+  "meeting_role_configs": [
+    {
+      "id": "f37bd632-911b-421b-97b0-e21d86e6288a",
+      "meeting_id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "role": "PRIME",
+      "provider": "local-sim",
+      "model": "gpt-sim-001",
+      "temperature": 0.4,
+      "max_output_tokens": 800,
+      "system_prompt_version": "v1",
+      "created_at": "2026-01-06T04:22:48.422Z"
+    },
+    {
+      "id": "9701b4b8-4ac8-41db-91d0-30de7924b5b9",
+      "meeting_id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "role": "CRITIC",
+      "provider": "local-sim",
+      "model": "gpt-sim-001",
+      "temperature": 0.6,
+      "max_output_tokens": 500,
+      "system_prompt_version": "v1",
+      "created_at": "2026-01-06T04:22:48.422Z"
+    },
+    {
+      "id": "a0fccef1-74d0-4dda-9704-ab86ce452fa3",
+      "meeting_id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "role": "FINANCE",
+      "provider": "local-sim",
+      "model": "gpt-sim-001",
+      "temperature": 0.3,
+      "max_output_tokens": 500,
+      "system_prompt_version": "v1",
+      "created_at": "2026-01-06T04:22:48.422Z"
+    },
+    {
+      "id": "5964cf9b-2ca5-4ded-9aa6-89db1f8444ce",
+      "meeting_id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "role": "WORKS",
+      "provider": "local-sim",
+      "model": "gpt-sim-001",
+      "temperature": 0.4,
+      "max_output_tokens": 500,
+      "system_prompt_version": "v1",
+      "created_at": "2026-01-06T04:22:48.422Z"
+    },
+    {
+      "id": "ed2e11ee-a2fb-4e69-8042-ebf94234ef7c",
+      "meeting_id": "856813e2-a7de-4cfb-a063-13853f44f7bc",
+      "role": "CLERK",
+      "provider": "local-sim",
+      "model": "gpt-sim-001",
+      "temperature": 0.2,
+      "max_output_tokens": 350,
+      "system_prompt_version": "v1",
+      "created_at": "2026-01-06T04:22:48.422Z"
+    }
+  ],
+  "messages": [],
+  "llm_calls": [],
+  "meeting_artifacts": []
+}

@@ -1,0 +1,5 @@
+const { PersonaLoader } = await import('../src/services/persona/personaLoader.js')
+const loader = new PersonaLoader()
+const personas = await loader.loadAllPersonas()
+console.log('Loaded', personas.length, 'personas')
+console.log('IDs:', personas.map(p => p.id))
