@@ -16,6 +16,7 @@ export class FlowControl {
   private roleManager = getRoleManager()
   private retriever = getContextRetriever()
   private compressor = getContextCompressor()
+  private static completionQueue: Promise<void> = Promise.resolve()
 
   private shuffleRoles(roles: string[]): string[] {
     const shuffled = [...roles]
@@ -24,6 +25,56 @@ export class FlowControl {
       ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
     }
     return shuffled
+  }
+
+  private readonly speechCharLimit = 50
+
+  private getRoleFocusInstruction(role: string): string {
+    const upperRole = role.toUpperCase()
+    switch (upperRole) {
+      case 'CRITIC':
+        return '你是风险审查官，只能从风险、漏洞、反例角度发言，不要给预算细节。'
+      case 'FINANCE':
+        return '你是财政官，只能从成本、收益、预算约束角度发言，必须包含金额或成本判断。'
+      case 'WORKS':
+        return '你是实务执行官，只能从落地步骤、资源安排、时间节点角度发言。'
+      default:
+        return '请严格按照你的角色定位发言。'
+    }
+  }
+
+  private withSpeechLimitInstruction(prompt: string): string {
+    return `${prompt}\n\n硬性要求：你的最终发言必须控制在${this.speechCharLimit}个中文字符以内，不要换行，不要分点。`
+  }
+
+  private enforceSpeechLimit(content: string): string {
+    const normalized = (content || '').replace(/\s+/g, ' ').trim()
+    const chars = Array.from(normalized)
+    if (chars.length <= this.speechCharLimit) {
+      return normalized
+    }
+    return chars.slice(0, this.speechCharLimit).join('')
+  }
+
+  private getSelectedRoleIds(meeting: Meeting): string[] {
+    const selected = Array.isArray(meeting.selectedRoleIds) ? meeting.selectedRoleIds : []
+    if (selected.length === 0) {
+      return ['prime', 'brain', 'critic', 'finance', 'works']
+    }
+    return [...new Set(selected.map((role) => role.toLowerCase()))]
+  }
+
+  private getDiscussionRoles(meeting: Meeting): string[] {
+    const roles = this.getSelectedRoleIds(meeting)
+      .filter((role) => !['prime', 'brain', 'clerk'].includes(role))
+      .map((role) => role.toUpperCase())
+
+    if (roles.length > 0) {
+      return roles
+    }
+
+    // Safety fallback: keep core department discussion available.
+    return ['CRITIC', 'FINANCE', 'WORKS']
   }
 
   /**
@@ -35,15 +86,24 @@ export class FlowControl {
     temperature?: number,
     maxTokens?: number
   ) {
-    const { provider, model, temperature: defaultTemp, maxTokens: defaultMaxTokens } =
-      await getRoleProvider(role)
+    const run = async () => {
+      const { provider, model, temperature: defaultTemp, maxTokens: defaultMaxTokens } =
+        await getRoleProvider(role)
 
-    return provider.complete({
-      messages,
-      model,
-      temperature: temperature ?? defaultTemp,
-      maxTokens: maxTokens ?? defaultMaxTokens,
-    })
+      return provider.complete({
+        messages,
+        model,
+        temperature: temperature ?? defaultTemp,
+        maxTokens: maxTokens ?? defaultMaxTokens,
+      })
+    }
+
+    const task = FlowControl.completionQueue.then(run, run)
+    FlowControl.completionQueue = task.then(
+      () => undefined,
+      () => undefined
+    )
+    return task
   }
 
   /**
@@ -159,13 +219,13 @@ export class FlowControl {
       minRelevance: 0.6,
     })
 
-    const userPrompt = `请为以下议题创建简报:
+    const userPrompt = this.withSpeechLimitInstruction(`请为以下议题创建简报:
 
 议题: ${meeting.topic}
 ${meeting.description ? `描述: ${meeting.description}` : ''}
 
 ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : ''}(注：以上为历史相关决策和经验，供参考)
-`
+`)
 
     const response = await this.completeForRole(
       'prime',
@@ -182,7 +242,7 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
       timestamp: new Date().toISOString(),
       role: 'PRIME',
       type: 'statement',
-      content: response.content,
+      content: this.enforceSpeechLimit(response.content),
     }
 
     const artifact = {
@@ -202,13 +262,26 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
    * Execute Department Speeches stage
    */
   private async executeDepartmentSpeeches(meeting: Meeting, ws?: WebSocket): Promise<{ messages: Message[]; tokens: number }> {
-    const roles = this.shuffleRoles(['CRITIC', 'FINANCE', 'WORKS'])
+    const roles = this.shuffleRoles(this.getDiscussionRoles(meeting))
     const messages: Message[] = []
     let totalTokens = 0
 
+    if (roles.length === 0) {
+      return {
+        messages: [{
+          id: `msg-${Date.now()}-system`,
+          timestamp: new Date().toISOString(),
+          role: 'SYSTEM',
+          type: 'system',
+          content: '无可用部门角色，跳过部门发言阶段。',
+        }],
+        tokens: 0,
+      }
+    }
+
     // Compress context if needed
     const contextMessages = await this.compressor.compressIfNeeded(meeting)
-    const discussionSoFar = contextMessages
+    const baseDiscussionSoFar = contextMessages
       .map((m) => {
         if (m.type === 'compressed') {
           return `[${m.metadata?.compressionMethod || 'summary'}] ${m.metadata?.originalCount || '?'} 条消息已压缩`
@@ -219,7 +292,22 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
 
     for (const role of roles) {
       const systemPrompt = await (await this.roleManager).getSystemPrompt(role.toLowerCase())
-      const userPrompt = `议题: ${meeting.topic}\n\n已发言内容:\n${discussionSoFar}\n\n请结合以上发言，提供你的完整意见和建议。`
+      const roleFocus = this.getRoleFocusInstruction(role)
+      const liveDiscussionSoFar = [
+        baseDiscussionSoFar,
+        ...messages.map((m) => `${m.role}: ${m.content}`),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+      const userPrompt = this.withSpeechLimitInstruction(`议题: ${meeting.topic}
+
+角色要求:
+${roleFocus}
+
+已发言内容:
+${liveDiscussionSoFar}
+
+请结合以上发言，提供你的完整意见和建议。`)
 
       const response = await this.completeForRole(
         role.toLowerCase(),
@@ -236,7 +324,7 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
         timestamp: new Date().toISOString(),
         role,
         type: 'statement',
-        content: response.content,
+        content: this.enforceSpeechLimit(response.content),
       }
 
       messages.push(message)
@@ -260,13 +348,14 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
    */
   private async executeBrainIntervention(meeting: Meeting): Promise<{ messages: Message[]; artifact: any; tokens: number }> {
     const messages: Message[] = []
+    const participatingRoles = this.getDiscussionRoles(meeting)
 
     // Build context for BRAIN
     const context: DiscussionContext = {
       topic: meeting.topic,
       messages: meeting.messages,
       currentStage: 'brain_intervention',
-      participatingRoles: ['CRITIC', 'FINANCE', 'WORKS'],
+      participatingRoles,
       remainingBudget: meeting.budget - meeting.usage,
     }
 
@@ -282,11 +371,11 @@ ${contextPackage.tokens > 0 ? `\n相关背景:\n${contextPackage.content}\n` : '
 请以JSON格式回复分析结果。`
 
     const recentDiscussion = meeting.messages
-      .filter(m => m.role === 'CRITIC' || m.role === 'FINANCE' || m.role === 'WORKS')
+      .filter(m => participatingRoles.includes(m.role))
       .map(m => `${m.role}: ${m.content}`)
       .join('\n\n')
 
-    const userPrompt = `议题: ${meeting.topic}
+    const userPrompt = this.withSpeechLimitInstruction(`议题: ${meeting.topic}
 
 第一轮部门发言：
 ${recentDiscussion}
@@ -303,7 +392,7 @@ ${recentDiscussion}
   "shouldIntervene": true|false
 }
 
-如果没有需要澄清的问题，将 shouldIntervene 设为 false，clarificationNeeded 设为 null。`
+如果没有需要澄清的问题，将 shouldIntervene 设为 false，clarificationNeeded 设为 null。`)
 
     try {
       const response = await this.completeForRole(
@@ -321,7 +410,7 @@ ${recentDiscussion}
         timestamp: new Date().toISOString(),
         role: 'BRAIN',
         type: 'statement',
-        content: response.content,
+        content: this.enforceSpeechLimit(response.content),
       }
 
       messages.push(message)
@@ -341,8 +430,10 @@ ${recentDiscussion}
       // If clarification needed, get the response
       if (analysis?.shouldIntervene && analysis?.clarificationNeeded?.role) {
         const targetRole = analysis.clarificationNeeded.role
-        const clarification = await this.getClarification(meeting, targetRole, analysis.clarificationNeeded.question)
-        messages.push(clarification.message)
+        if (participatingRoles.includes(String(targetRole).toUpperCase())) {
+          const clarification = await this.getClarification(meeting, targetRole, analysis.clarificationNeeded.question)
+          messages.push(clarification.message)
+        }
       }
 
       const artifact = {
@@ -385,7 +476,7 @@ ${recentDiscussion}
       .map(m => `${m.role}: ${m.content}`)
       .join('\n\n')
 
-    const userPrompt = `议题: ${meeting.topic}
+    const userPrompt = this.withSpeechLimitInstruction(`议题: ${meeting.topic}
 
 之前的讨论：
 ${discussion}
@@ -393,7 +484,7 @@ ${discussion}
 BRAIN 请你澄清以下问题：
 ${question}
 
-请提供详细回答。`
+请提供详细回答。`)
 
     const response = await this.completeForRole(
       role.toLowerCase(),
@@ -410,7 +501,7 @@ ${question}
       timestamp: new Date().toISOString(),
       role: role.toUpperCase(),
       type: 'statement',
-      content: response.content,
+      content: this.enforceSpeechLimit(response.content),
     }
 
     return {
@@ -424,10 +515,11 @@ ${question}
    */
   private async executePrimeSummary(meeting: Meeting): Promise<{ messages: Message[]; artifact: any; tokens: number }> {
     const systemPrompt = await (await this.roleManager).getSystemPrompt('prime')
+    const participatingRoles = this.getDiscussionRoles(meeting)
 
     // Build discussion summary including BRAIN analysis
     const discussion = meeting.messages
-      .filter(m => ['CRITIC', 'FINANCE', 'WORKS', 'BRAIN'].includes(m.role))
+      .filter(m => participatingRoles.includes(m.role) || m.role === 'BRAIN')
       .map((m) => `${m.role}: ${m.content}`)
       .join('\n\n')
 
@@ -436,7 +528,7 @@ ${question}
       ? `\n\n主脑分析结果：\n${JSON.stringify(brainAnalysis, null, 2)}`
       : ''
 
-    const userPrompt = `议题: ${meeting.topic}
+    const userPrompt = this.withSpeechLimitInstruction(`议题: ${meeting.topic}
 
 各部门发言及主脑分析：
 ${discussion}${analysisContext}
@@ -447,7 +539,7 @@ ${discussion}${analysisContext}
 3. **分歧点**：需要进一步讨论的问题
 4. **后续方向**：第二轮讨论需要聚焦的重点
 
-请用清晰的标题和段落组织回答。`
+请用清晰的标题和段落组织回答。`)
 
     const response = await this.completeForRole(
       'prime',
@@ -464,7 +556,7 @@ ${discussion}${analysisContext}
       timestamp: new Date().toISOString(),
       role: 'PRIME',
       type: 'statement',
-      content: response.content,
+      content: this.enforceSpeechLimit(response.content),
     }
 
     const artifact = {
@@ -483,9 +575,13 @@ ${discussion}${analysisContext}
    * Execute Follow-up Discussion stage (Round 2)
    */
   private async executeFollowUpDiscussion(meeting: Meeting, ws?: WebSocket): Promise<{ messages: Message[]; tokens: number }> {
-    const roles = this.shuffleRoles(['CRITIC', 'FINANCE', 'WORKS'])
+    const roles = this.shuffleRoles(this.getDiscussionRoles(meeting))
     const messages: Message[] = []
     let totalTokens = 0
+
+    if (roles.length === 0) {
+      return { messages, tokens: 0 }
+    }
 
     const primeSummary = meeting.messages.find(m => m.id.includes('prime-summary'))
     const brainAnalysis = meeting.artifacts.brainAnalysis
@@ -497,19 +593,27 @@ ${discussion}${analysisContext}
 
     for (const role of roles) {
       const roleSystemPrompt = await (await this.roleManager).getSystemPrompt(role.toLowerCase())
+      const roleFocus = this.getRoleFocusInstruction(role)
+      const latestUserMessage = [...meeting.messages].reverse().find((m) => m.role === 'USER')
 
-      const followupPrompt = `议题: ${meeting.topic}
+      const followupPrompt = this.withSpeechLimitInstruction(`议题: ${meeting.topic}
 
 群主总结：
 ${primeSummary?.content || '（无）'}
 
 ${discussionPoints}
 
+用户最新追加意见：
+${latestUserMessage?.content || '（无）'}
+
+角色要求：
+${roleFocus}
+
 请判断是否需要继续发言：
 - 如果需要补充或回应分歧点，请直接给出你的发言。
 - 如果群主总结已充分涵盖你的观点，请仅回复 "NO_RESPONSE"。
 
-注意：第二轮重点是对分歧点的回应和补充。`
+注意：第二轮重点是对分歧点的回应和补充。`)
 
       const followup = await this.completeForRole(
         role.toLowerCase(),
@@ -521,7 +625,7 @@ ${discussionPoints}
         800
       )
 
-      const content = followup.content.trim()
+      const content = this.enforceSpeechLimit(followup.content.trim())
       const noResponseSignals = ['NO_RESPONSE', '不发言', '无需补充', '无补充', '不需要补充', '总结已涵盖', '无新增观点']
       const shouldSkip = noResponseSignals.some((signal) => content.includes(signal))
 
@@ -562,7 +666,7 @@ ${discussionPoints}
 
     // Build full context
     const discussion = meeting.messages.map((m) => `${m.role}: ${m.content}`).join('\n\n')
-    const userPrompt = `基于以下讨论，请做出最终决定:\n\n议题: ${meeting.topic}\n\n讨论内容:\n${discussion}\n\n请提供:\n1. 决定\n2. 理由\n3. 后续步骤`
+    const userPrompt = this.withSpeechLimitInstruction(`基于以下讨论，请做出最终决定:\n\n议题: ${meeting.topic}\n\n讨论内容:\n${discussion}\n\n请提供:\n1. 决定\n2. 理由\n3. 后续步骤`)
 
     const response = await this.completeForRole(
       'prime',
@@ -579,7 +683,7 @@ ${discussionPoints}
       timestamp: new Date().toISOString(),
       role: 'PRIME',
       type: 'statement',
-      content: response.content,
+      content: this.enforceSpeechLimit(response.content),
     }
 
     const artifact = {
