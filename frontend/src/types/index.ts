@@ -3,6 +3,7 @@ export interface Meeting {
   id: string
   topic: string
   description?: string
+  selectedRoleIds?: string[]
   status: 'pending' | 'running' | 'completed' | 'failed'
   error?: string
   budget: number

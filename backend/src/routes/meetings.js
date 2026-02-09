@@ -6,6 +6,27 @@ const router = express.Router()
 
 // TODO: Implement in-memory store for meetings
 const meetings = new Map()
+const DEFAULT_ROLES = ['prime', 'brain', 'critic', 'finance', 'works']
+
+function normalizeSelectedRoles(input) {
+  if (!Array.isArray(input)) {
+    return [...DEFAULT_ROLES]
+  }
+  const normalized = input
+    .map((roleId) => String(roleId || '').trim().toLowerCase())
+    .filter(Boolean)
+  const deduped = [...new Set(normalized)]
+  if (deduped.length === 0) {
+    return [...DEFAULT_ROLES]
+  }
+  if (!deduped.includes('prime')) {
+    deduped.unshift('prime')
+  }
+  if (!deduped.includes('brain')) {
+    deduped.push('brain')
+  }
+  return deduped
+}
 
 // GET /api/meetings - List all meetings
 router.get('/', (req, res) => {
@@ -24,7 +45,7 @@ router.get('/:id', (req, res) => {
 
 // POST /api/meetings - Create a new meeting
 router.post('/', (req, res) => {
-  const { topic, description, budget = 50000 } = req.body
+  const { topic, description, budget = 50000, selectedRoleIds } = req.body
 
   if (!topic) {
     return res.status(400).json({ error: 'Topic is required' })
@@ -34,6 +55,7 @@ router.post('/', (req, res) => {
     id: Date.now().toString(),
     topic,
     description,
+    selectedRoleIds: normalizeSelectedRoles(selectedRoleIds),
     status: 'pending',
     budget,
     usage: 0,
@@ -65,7 +87,7 @@ router.post('/:id/run', async (req, res) => {
 
   // Validate providers are configured for required roles
   try {
-    const requiredRoles = ['prime', 'critic', 'finance', 'works', 'brain']
+    const requiredRoles = normalizeSelectedRoles(meeting.selectedRoleIds)
     for (const role of requiredRoles) {
       const { provider } = await getRoleProvider(role)
       if (!provider.isConfigured()) {

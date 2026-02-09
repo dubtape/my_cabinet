@@ -46,13 +46,19 @@ export default function MeetingTimeline({ messages }: MeetingTimelineProps) {
 
   return (
     <div className="space-y-4">
-      {messages.map((message, index) => (
-        <div
-          key={message.id}
-          className={`rounded-lg border p-4 transition-all hover:shadow-lg ${getRoleColor(message.role)} ${
-            index === messages.length - 1 ? 'ring-2 ring-cyan-500' : ''
-          }`}
-        >
+      {messages.map((message, index) => {
+        const targetRole =
+          typeof message.metadata?.targetRole === 'string'
+            ? message.metadata.targetRole
+            : null
+
+        return (
+          <div
+            key={message.id}
+            className={`rounded-lg border p-4 transition-all hover:shadow-lg ${getRoleColor(message.role)} ${
+              index === messages.length - 1 ? 'ring-2 ring-cyan-500' : ''
+            }`}
+          >
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <span className="text-lg">{getMessageIcon(message.type)}</span>
@@ -68,17 +74,18 @@ export default function MeetingTimeline({ messages }: MeetingTimelineProps) {
             </span>
           </div>
 
-          {message.metadata?.targetRole && (
+          {targetRole && (
             <p className="mb-2 text-sm text-slate-400">
-              → @{message.metadata.targetRole as string}
+              → @{targetRole}
             </p>
           )}
 
           <div className="prose prose-invert max-w-none">
             <p className="whitespace-pre-wrap text-slate-200">{message.content}</p>
           </div>
-        </div>
-      ))}
+          </div>
+        )
+      })}
     </div>
   )
 }

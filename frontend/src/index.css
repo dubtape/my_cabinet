@@ -4,56 +4,249 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --border: 215 14% 76%;
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    color: #1f2937;
+    font-family: 'Chicago', 'Geneva', 'Verdana', sans-serif;
+    background:
+      radial-gradient(circle at 16% 12%, rgba(255, 255, 255, 0.8), transparent 30%),
+      repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.1) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0 1px, transparent 1px 24px),
+      linear-gradient(145deg, #d6dde8, #b7c4d8 60%, #97a7bf);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
+@layer components {
+  .apple-desktop {
+    width: 100%;
+    height: 100%;
+    padding: 0;
   }
-  body {
-    @apply bg-background text-foreground;
+
+  .apple-window {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    width: 100%;
+    height: 100%;
+    border: 1px solid #6b7280;
+    background: #e8edf5;
+  }
+
+  .apple-sidebar {
+    border-right: 1px solid #9ca3af;
+    background: linear-gradient(180deg, #d6deea, #c2cedf);
+    padding: 12px;
+  }
+
+  .apple-sidebar-title {
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+  }
+
+  .apple-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .apple-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    background: #edf2f8;
+    padding: 7px 8px;
+    font-size: 13px;
+    color: #334155;
+    text-align: left;
+  }
+
+  .apple-nav-item-active {
+    border-color: #1d4ed8;
+    background: #dbeafe;
+    color: #1e3a8a;
+  }
+
+  .apple-main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+  }
+
+  .apple-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid #9ca3af;
+    background: linear-gradient(180deg, #f8fafc, #d1d9e6);
+    padding: 9px 14px;
+  }
+
+  .apple-lights {
+    display: flex;
+    gap: 6px;
+  }
+
+  .apple-light {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.35);
+  }
+
+  .apple-light-red { background: #ef4444; }
+  .apple-light-yellow { background: #f59e0b; }
+  .apple-light-green { background: #10b981; }
+
+  .apple-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .apple-content {
+    min-height: 0;
+    flex: 1;
+    overflow: auto;
+    padding: 14px;
+  }
+
+  .apple-panel {
+    border: 1px solid #b8c1cf;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #ffffff, #eef2f7);
+    box-shadow: inset 0 1px 0 #ffffff;
+  }
+
+  .apple-card {
+    border: 1px solid #c7ced9;
+    border-radius: 7px;
+    padding: 10px;
+    background: #f8fafc;
+    font-size: 13px;
+    color: #475569;
+  }
+
+  .apple-card-title {
+    margin-bottom: 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .apple-input {
+    border: 1px solid #9ca3af;
+    border-radius: 7px;
+    background: #ffffff;
+    padding: 8px 10px;
+    color: #111827;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+
+  .apple-input:focus {
+    outline: 2px solid #60a5fa;
+    outline-offset: 0;
+  }
+
+  .apple-primary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #0f4ba8;
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #ffffff;
+    background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  }
+
+  .apple-primary-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .apple-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid #94a3b8;
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 12px;
+    background: #f8fafc;
+    color: #334155;
+  }
+
+  .apple-role-card {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid #b8c1cf;
+    border-radius: 8px;
+    background: #f8fafc;
+    padding: 10px;
+    color: #1f2937;
+  }
+
+  .apple-role-card-selected {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  .apple-role-avatar {
+    display: flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  @media (max-width: 900px) {
+    .apple-window {
+      grid-template-columns: 1fr;
+    }
+
+    .apple-sidebar {
+      border-right: 0;
+      border-bottom: 1px solid #9ca3af;
+      padding: 8px;
+    }
+
+    .apple-nav {
+      flex-direction: row;
+      flex-wrap: wrap;
+    }
   }
 }

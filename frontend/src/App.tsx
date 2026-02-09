@@ -3,7 +3,6 @@ import HomePage from './pages/HomePage'
 import ChatPage from './pages/ChatPage'
 import HistoryPage from './pages/HistoryPage'
 import RoleManager from './pages/RoleManager'
-import Settings from './pages/Settings'
 
 function App() {
   return (
@@ -12,7 +11,6 @@ function App() {
       <Route path="/chat/:id" element={<ChatPage />} />
       <Route path="/history" element={<HistoryPage />} />
       <Route path="/roles" element={<RoleManager />} />
-      <Route path="/settings" element={<Settings />} />
     </Routes>
   )
 }

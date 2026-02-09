@@ -1,332 +1,264 @@
-import { useEffect, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { Play, Send } from 'lucide-react'
+import AppShell from '../components/AppShell'
 import { useMeetingStore } from '../stores/useMeetingStore'
-import { ArrowLeft, Send, MoreVertical } from 'lucide-react'
+
+const ROLE_STYLES: Record<string, { dot: string; name: string }> = {
+  PRIME: { dot: '#d97706', name: '首辅' },
+  BRAIN: { dot: '#2563eb', name: '主脑' },
+  CRITIC: { dot: '#b91c1c', name: '御史' },
+  FINANCE: { dot: '#047857', name: '户部' },
+  WORKS: { dot: '#1d4ed8', name: '工部' },
+  CLERK: { dot: '#4b5563', name: '吏部' },
+  USER: { dot: '#0f766e', name: '您' },
+}
 
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
-  const { currentMeeting, messages, isConnected, addMessage, setConnected, setCurrentMeeting } = useMeetingStore()
+  const {
+    currentMeeting,
+    messages,
+    isConnected,
+    setConnected,
+    setCurrentMeeting,
+    setMessages,
+  } = useMeetingStore()
+
   const [inputValue, setInputValue] = useState('')
-  const [isTyping, setIsTyping] = useState(false)
+  const [isStarting, setIsStarting] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
 
+  const wsCandidates = useMemo(() => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const directHost = window.location.hostname || 'localhost'
+    const isDevServer = window.location.port === '5173'
+
+    if (isDevServer) {
+      // In Vite dev, connect backend WS directly to avoid proxy socket abort noise.
+      return [
+        `${protocol}//${directHost}:3001/ws`,
+        `${protocol}//localhost:3001/ws`,
+        `${protocol}//127.0.0.1:3001/ws`,
+      ]
+    }
+
+    return [
+      `${protocol}//${window.location.host}/ws`,
+      `${protocol}//${directHost}:3001/ws`,
+      `${protocol}//localhost:3001/ws`,
+      `${protocol}//127.0.0.1:3001/ws`,
+    ]
+  }, [])
+
   useEffect(() => {
-    // Fetch meeting details
+    if (!id) return
+
     const fetchMeeting = async () => {
       try {
         const response = await fetch(`/api/meetings/${id}`)
         if (!response.ok) throw new Error('Failed to fetch meeting')
         const meeting = await response.json()
         setCurrentMeeting(meeting)
+        setMessages(meeting.messages || [])
       } catch (error) {
         console.error('Failed to fetch meeting:', error)
       }
     }
 
     fetchMeeting()
-  }, [id, setCurrentMeeting])
+  }, [id, setCurrentMeeting, setMessages])
 
   useEffect(() => {
-    // Connect WebSocket
-    const ws = new WebSocket('ws://localhost:3000/ws')
-    wsRef.current = ws
+    if (!id) return
 
-    ws.onopen = () => {
-      console.log('WebSocket connected')
-      setConnected(true)
-      // Join meeting
-      ws.send(JSON.stringify({ type: 'JOIN_MEETING', meetingId: id }))
-    }
+    let stopped = false
+    let activeWs: WebSocket | null = null
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      console.log('WebSocket message:', data)
+    const connectByIndex = (index: number) => {
+      if (stopped || index >= wsCandidates.length) {
+        setConnected(false)
+        return
+      }
 
-      if (data.type === 'MEETING_UPDATED') {
-        setCurrentMeeting(data.meeting)
-        // Check for new messages
-        if (data.meeting.messages.length > messages.length) {
-          const newMessages = data.meeting.messages.slice(messages.length)
-          newMessages.forEach((msg: any) => addMessage(msg))
+      const ws = new WebSocket(wsCandidates[index])
+      activeWs = ws
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        if (stopped) {
+          ws.close()
+          return
         }
+        setConnected(true)
+        ws.send(JSON.stringify({ type: 'JOIN_MEETING', meetingId: id }))
+      }
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        if (data.type === 'MEETING_UPDATED') {
+          setCurrentMeeting(data.meeting)
+          setMessages(data.meeting.messages || [])
+        }
+      }
+
+      ws.onclose = () => {
+        if (stopped) return
+        setConnected(false)
+        connectByIndex(index + 1)
+      }
+
+      ws.onerror = () => {
+        if (stopped) return
+        setConnected(false)
+        ws.close()
       }
     }
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected')
-      setConnected(false)
-    }
-
-    ws.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
+    connectByIndex(0)
 
     return () => {
-      ws.close()
+      stopped = true
+      if (activeWs) {
+        activeWs.close()
+      }
+      wsRef.current = null
     }
-  }, [id, messages.length, addMessage, setConnected, setCurrentMeeting])
+  }, [id, wsCandidates, setConnected, setCurrentMeeting, setMessages])
 
   useEffect(() => {
-    // Auto-scroll to bottom
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   const handleSend = () => {
-    if (!inputValue.trim() || !wsRef.current) return
+    if (!inputValue.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !id) return
 
     wsRef.current.send(
       JSON.stringify({
         type: 'USER_RESPONSE',
         meetingId: id,
-        response: inputValue,
+        response: inputValue.trim(),
       })
     )
-
-    // Add user message locally
-    addMessage({
-      id: `msg-${Date.now()}-user`,
-      timestamp: new Date().toISOString(),
-      role: 'USER',
-      type: 'response',
-      content: inputValue,
-    })
 
     setInputValue('')
   }
 
   const handleStartMeeting = async () => {
+    if (!id) return
+
+    setIsStarting(true)
     try {
-      const response = await fetch(`/api/meetings/${id}/run`, {
-        method: 'POST',
-      })
-      if (!response.ok) throw new Error('Failed to start meeting')
-      alert('会议已启动')
+      const response = await fetch(`/api/meetings/${id}/run`, { method: 'POST' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to start meeting')
+      }
+      if (currentMeeting) {
+        setCurrentMeeting({ ...currentMeeting, status: 'running' })
+      }
     } catch (error) {
-      console.error('Failed to start meeting:', error)
-      alert('启动会议失败')
+      const message = error instanceof Error ? error.message : '启动会议失败'
+      alert(message)
+    } finally {
+      setIsStarting(false)
     }
   }
 
-  const getRoleAvatar = (roleName: string) => {
-    const colors: Record<string, string> = {
-      PRIME: 'bg-amber-500',
-      BRAIN: 'bg-purple-500',
-      CRITIC: 'bg-red-500',
-      FINANCE: 'bg-green-500',
-      WORKS: 'bg-blue-500',
-      CLERK: 'bg-gray-500',
-      USER: 'bg-green-600',
-    }
-    const titles: Record<string, string> = {
-      PRIME: '首',
-      BRAIN: '学',
-      CRITIC: '御',
-      FINANCE: '户',
-      WORKS: '工',
-      CLERK: '吏',
-      USER: '您',
-    }
-    return {
-      color: colors[roleName] || 'bg-slate-500',
-      title: titles[roleName] || roleName[0],
-    }
-  }
-
-  const getRoleTitle = (roleName: string) => {
-    const titles: Record<string, string> = {
-      PRIME: '首辅',
-      BRAIN: '学士',
-      CRITIC: '御史',
-      FINANCE: '户部',
-      WORKS: '工部',
-      CLERK: '吏部',
-      USER: '您',
-    }
-    return titles[roleName] || roleName
+  const getStatusText = (status?: string) => {
+    if (status === 'running') return '进行中'
+    if (status === 'completed') return '已完成'
+    if (status === 'failed') return '失败'
+    return '等待开始'
   }
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Sidebar */}
-      <div className="w-80 border-r border-slate-700 bg-slate-900/50 p-6 backdrop-blur-sm">
-        <button
-          onClick={() => navigate('/history')}
-          className="mb-6 flex items-center text-slate-400 hover:text-cyan-400 transition-colors"
-        >
-          <ArrowLeft className="mr-2 h-5 w-5" />
-          返回奏折库
-        </button>
-
-        {currentMeeting && (
-          <>
-            <h2 className="mb-4 text-xl font-bold text-white">当前议题</h2>
-            <div className="mb-6 rounded-lg bg-slate-800/50 p-4">
-              <h3 className="mb-2 font-semibold text-cyan-400">{currentMeeting.topic}</h3>
-              {currentMeeting.description && (
-                <p className="text-sm text-slate-300">{currentMeeting.description}</p>
+    <AppShell title="议政大厅" backTo="/history">
+      <div className="grid h-full min-h-[70vh] gap-3 lg:grid-cols-[280px_1fr]">
+        <aside className="apple-panel p-3 text-sm">
+          <div className="mb-3 text-xs uppercase text-slate-500">议题信息</div>
+          {currentMeeting ? (
+            <>
+              <div className="mb-2 font-semibold">{currentMeeting.topic}</div>
+              <div className="text-xs text-slate-600">状态: {getStatusText(currentMeeting.status)}</div>
+              <div className="mt-1 text-xs text-slate-600">WebSocket: {isConnected ? '已连接' : '未连接'}</div>
+              {currentMeeting.status === 'pending' && (
+                <button type="button" onClick={handleStartMeeting} disabled={isStarting} className="apple-primary-btn mt-3 w-full justify-center">
+                  <Play className="h-4 w-4" />
+                  {isStarting ? '启动中...' : '开始议政'}
+                </button>
               )}
-              <div className="mt-3 flex items-center space-x-2">
-                <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                    currentMeeting.status === 'running'
-                      ? 'bg-green-500/10 text-green-400'
-                      : currentMeeting.status === 'completed'
-                      ? 'bg-blue-500/10 text-blue-400'
-                      : currentMeeting.status === 'failed'
-                      ? 'bg-red-500/10 text-red-400'
-                      : 'bg-yellow-500/10 text-yellow-400'
-                  }`}
-                >
-                  {currentMeeting.status === 'running' && '进行中'}
-                  {currentMeeting.status === 'completed' && '已完成'}
-                  {currentMeeting.status === 'failed' && '失败'}
-                  {currentMeeting.status === 'pending' && '等待开始'}
-                </span>
-              </div>
-            </div>
+            </>
+          ) : (
+            <div className="text-xs text-slate-500">加载中...</div>
+          )}
+        </aside>
 
-            {currentMeeting.status === 'pending' && (
-              <button
-                onClick={handleStartMeeting}
-                className="w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-2 font-semibold text-white hover:from-cyan-600 hover:to-blue-600"
-              >
-                开始议政
-              </button>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Main Chat Area */}
-      <div className="flex flex-1 flex-col">
-        {/* Toolbar */}
-        <div className="flex items-center justify-between border-b border-slate-700 bg-slate-900/50 px-6 py-3 backdrop-blur-sm">
-          <div className="flex items-center space-x-2">
-            <h1 className="text-lg font-semibold text-white">议政大厅</h1>
-            <span className="text-sm text-slate-400">#{id?.slice(-6)}</span>
+        <section className="apple-panel flex min-h-0 flex-col">
+          <div className="border-b border-slate-300 px-4 py-2 text-xs text-slate-600">
+            会议 #{id?.slice(-6)} · {getStatusText(currentMeeting?.status)}
           </div>
-          <div className="flex items-center space-x-2">
-            <div
-              className={`h-2 w-2 rounded-full ${
-                isConnected ? 'bg-green-500' : 'bg-red-500'
-              }`}
-            />
-            <span className="text-sm text-slate-400">
-              {isConnected ? '已连接' : '未连接'}
-            </span>
-          </div>
-        </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-3xl space-y-4">
-            {messages.length === 0 && (
-              <div className="py-12 text-center text-slate-400">
-                等待议政开始...
-              </div>
-            )}
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="mx-auto flex max-w-4xl flex-col gap-3">
+              {messages.length === 0 && (
+                <div className="apple-panel p-6 text-center text-sm text-slate-500">等待议政开始...</div>
+              )}
 
-            {messages.map((message) => {
-              const isUser = message.role === 'USER'
-              const isSystem = message.type === 'system'
-              const { color, title } = getRoleAvatar(message.role)
+              {messages.map((message) => {
+                if (message.type === 'system') {
+                  return (
+                    <div key={message.id} className="text-center text-xs text-slate-500">
+                      <span className="rounded border border-slate-300 bg-slate-100 px-2 py-1">{message.content}</span>
+                    </div>
+                  )
+                }
 
-              if (isSystem) {
+                const isUser = message.role === 'USER'
+                const meta = ROLE_STYLES[message.role] || { dot: '#64748b', name: message.role }
+
                 return (
-                  <div key={message.id} className="py-2 text-center">
-                    <span className="rounded-full bg-slate-800/50 px-3 py-1 text-xs text-slate-400">
-                      {message.content}
-                    </span>
-                  </div>
-                )
-              }
-
-              return (
-                <div
-                  key={message.id}
-                  className={`flex items-start space-x-3 ${isUser ? 'flex-row-reverse space-x-reverse' : ''}`}
-                >
-                  <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full ${color} text-white text-sm font-semibold`}>
-                    {title}
-                  </div>
-                  <div className={`flex max-w-[70%] ${isUser ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`rounded-2xl px-4 py-2 ${
-                        isUser
-                          ? 'bg-green-500 text-white'
-                          : message.role === 'PRIME'
-                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-white shadow-lg'
-                          : 'bg-white text-slate-900 shadow-md'
-                      }`}
-                    >
-                      {!isUser && (
-                        <div className={`mb-1 text-xs ${message.role === 'PRIME' ? 'text-amber-100' : 'text-slate-500'}`}>
-                          {getRoleTitle(message.role)}
-                        </div>
-                      )}
-                      <div className={`text-sm ${isUser ? 'text-white' : 'text-slate-900'}`}>
-                        {message.content}
+                  <div key={message.id} className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[80%] rounded border px-3 py-2 shadow-sm ${isUser ? 'border-teal-500 bg-teal-600 text-white' : 'border-slate-300 bg-white text-slate-800'}`}>
+                      <div className={`mb-1 flex items-center gap-2 text-xs ${isUser ? 'text-teal-100' : 'text-slate-500'}`}>
+                        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: meta.dot }} />
+                        <span>{meta.name}</span>
+                        <span>{new Date(message.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div
-                        className={`mt-1 text-xs ${
-                          isUser ? 'text-green-100' : 'text-slate-400'
-                        }`}
-                      >
-                        {new Date(message.timestamp).toLocaleTimeString('zh-CN', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </div>
+                      <div className="whitespace-pre-wrap text-sm">{message.content}</div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
 
-            {isTyping && (
-              <div className="flex items-start space-x-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-500 text-white text-sm">
-                  ...
-                </div>
-                <div className="rounded-2xl bg-white px-4 py-3 shadow-md">
-                  <div className="flex space-x-1">
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:0.2s]" />
-                    <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400 [animation-delay:0.4s]" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} />
+            </div>
           </div>
-        </div>
 
-        {/* Input Area */}
-        <div className="border-t border-slate-700 bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="mx-auto max-w-3xl">
-            <div className="flex items-center space-x-3 rounded-full border border-slate-700 bg-white px-4 py-2 shadow-lg">
+          <div className="border-t border-slate-300 bg-white p-3">
+            <div className="mx-auto flex max-w-4xl gap-2">
               <input
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="您也想参与讨论？"
-                className="flex-1 bg-transparent text-slate-900 placeholder-slate-400 focus:outline-none"
+                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                placeholder="输入你的补充意见..."
+                className="apple-input flex-1"
               />
               <button
+                type="button"
                 onClick={handleSend}
                 disabled={!inputValue.trim() || !isConnected}
-                className="rounded-full bg-cyan-500 p-2 text-white hover:bg-cyan-600 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                className="apple-primary-btn min-w-20 justify-center"
               >
-                <Send className="h-5 w-5" />
+                <Send className="h-4 w-4" />
+                发送
               </button>
             </div>
           </div>
-        </div>
+        </section>
       </div>
-    </div>
+    </AppShell>
   )
 }

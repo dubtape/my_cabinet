@@ -47,10 +47,19 @@ export class OpenAIProvider extends LLMProvider {
     },
   ]
 
-  constructor(private apiKey?: string) {
+  constructor(
+    private apiKey?: string,
+    private baseURL?: string,
+    private timeout?: number
+  ) {
     super()
     if (apiKey) {
-      this.client = new OpenAI({ apiKey })
+      this.client = new OpenAI({
+        apiKey,
+        baseURL,
+        timeout,
+        maxRetries: 3,
+      })
     }
   }
 
@@ -58,41 +67,70 @@ export class OpenAIProvider extends LLMProvider {
     return this.client !== null && !!this.apiKey
   }
 
+  private isRetryableNetworkError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') return false
+    const maybe = error as { code?: string; cause?: { code?: string } }
+    const code = maybe.code || maybe.cause?.code
+    return code === 'ECONNABORTED' || code === 'ECONNRESET' || code === 'ETIMEDOUT'
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  private formatError(error: unknown): string {
+    if (error instanceof Error) {
+      const maybe = error as Error & { code?: string; cause?: { code?: string } }
+      const code = maybe.code || maybe.cause?.code
+      return code ? `${error.message} [${code}]` : error.message
+    }
+    return String(error)
+  }
+
   async complete(params: CompletionParams): Promise<CompletionResponse> {
     if (!this.client) {
       throw new Error('OpenAI client not configured. Please set OPENAI_API_KEY.')
     }
 
-    try {
-      const response = await this.client.chat.completions.create({
-        model: params.model || 'gpt-4o',
-        messages: params.messages as Array<{ role: string; content: string }>,
-        temperature: params.temperature ?? 0.7,
-        max_tokens: params.maxTokens ?? 2000,
-      })
+    let lastError: unknown
+    const maxAttempts = 3
 
-      const choice = response.choices[0]
-      if (!choice) {
-        throw new Error('No response from OpenAI')
-      }
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await this.client.chat.completions.create({
+          model: params.model || 'gpt-4o',
+          messages: params.messages as Array<{ role: string; content: string }>,
+          temperature: params.temperature ?? 0.7,
+          max_tokens: params.maxTokens ?? 2000,
+        })
 
-      return {
-        content: choice.message.content || '',
-        usage: response.usage
-          ? {
-              promptTokens: response.usage.prompt_tokens,
-              completionTokens: response.usage.completion_tokens,
-              totalTokens: response.usage.total_tokens,
-            }
-          : undefined,
-        model: response.model,
+        const choice = response.choices[0]
+        if (!choice) {
+          throw new Error('No response from OpenAI')
+        }
+
+        return {
+          content: choice.message.content || '',
+          usage: response.usage
+            ? {
+                promptTokens: response.usage.prompt_tokens,
+                completionTokens: response.usage.completion_tokens,
+                totalTokens: response.usage.total_tokens,
+              }
+            : undefined,
+          model: response.model,
+        }
+      } catch (error) {
+        lastError = error
+        if (!this.isRetryableNetworkError(error) || attempt === maxAttempts) {
+          break
+        }
+        // Network jitter on upstream providers is common; retry with backoff.
+        await this.sleep(300 * attempt)
       }
-    } catch (error) {
-      if (error instanceof Error) {
-        throw new Error(`OpenAI API error: ${error.message}`)
-      }
-      throw error
     }
+
+    throw new Error(`OpenAI API error: ${this.formatError(lastError)}`)
   }
 
   async *streamComplete(params: CompletionParams): AsyncGenerator<CompletionChunk> {

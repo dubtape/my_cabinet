@@ -81,16 +81,18 @@ export default function ArtifactCard({ type, artifact }: ArtifactCardProps) {
 
       case 'summary':
         const summary = artifact as Summary
+        const keyPoints = summary.keyPoints ?? []
+        const disagreements = summary.disagreements ?? []
         return (
           <>
             <h4 className="mb-3 text-xl font-bold text-slate-400">会议总结</h4>
-            <p className="mb-4 text-slate-300">{summary.discussion}</p>
+            <p className="mb-4 text-slate-300">{summary.discussion || summary.summary}</p>
 
-            {summary.keyPoints.length > 0 && (
+            {keyPoints.length > 0 && (
               <div className="mb-4">
                 <h5 className="mb-2 font-semibold text-slate-400">关键要点</h5>
                 <ul className="list-inside list-disc space-y-1 text-slate-300">
-                  {summary.keyPoints.map((point, i) => (
+                  {keyPoints.map((point, i) => (
                     <li key={i}>{point}</li>
                   ))}
                 </ul>
@@ -104,11 +106,11 @@ export default function ArtifactCard({ type, artifact }: ArtifactCardProps) {
               </div>
             )}
 
-            {summary.disagreements.length > 0 && (
+            {disagreements.length > 0 && (
               <div>
                 <h5 className="mb-2 font-semibold text-red-400">分歧</h5>
                 <ul className="list-inside list-disc space-y-1 text-slate-300">
-                  {summary.disagreements.map((point, i) => (
+                  {disagreements.map((point, i) => (
                     <li key={i}>{point}</li>
                   ))}
                 </ul>

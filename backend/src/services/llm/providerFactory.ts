@@ -1,4 +1,6 @@
 import { config } from 'dotenv'
+import fs from 'fs'
+import path from 'path'
 import { OpenAIProvider } from './providers/openai.js'
 import { AnthropicProvider } from './providers/anthropic.js'
 import { OllamaProvider } from './providers/ollama.js'
@@ -6,10 +8,16 @@ import { GLMProvider } from './providers/glm.js'
 import { DeepSeekProvider } from './providers/deepseek.js'
 import type { LLMProvider } from './providers/base.js'
 import type { ModelInfo } from './providers/base.js'
-import { getKey } from './keyStore.js'
 
-// Load environment variables
-config()
+// Load environment variables from root .env first, then cwd .env
+const envCandidates = [
+  path.resolve(process.cwd(), '..', '.env'),
+  path.resolve(process.cwd(), '.env'),
+]
+const envPath = envCandidates.find((candidate) => fs.existsSync(candidate))
+if (envPath) {
+  config({ path: envPath, override: true })
+}
 
 /**
  * Provider configuration
@@ -41,26 +49,30 @@ export class ProviderFactory {
 
     switch (config.type) {
       case 'openai':
-        provider = new OpenAIProvider(getKey('openaiApiKey') || process.env.OPENAI_API_KEY)
+        provider = new OpenAIProvider(
+          process.env.OPENAI_API_KEY,
+          process.env.OPENAI_BASE_URL,
+          process.env.OPENAI_TIMEOUT ? Number(process.env.OPENAI_TIMEOUT) : undefined
+        )
         break
       case 'anthropic':
-        provider = new AnthropicProvider(getKey('anthropicApiKey') || process.env.ANTHROPIC_API_KEY)
+        provider = new AnthropicProvider(process.env.ANTHROPIC_API_KEY)
         break
       case 'ollama':
         provider = new OllamaProvider(
-          getKey('ollamaBaseUrl') || process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
+          process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
         )
         break
       case 'glm':
         provider = new GLMProvider({
-          apiKey: getKey('glmApiKey') || process.env.GLM_API_KEY || '',
-          baseURL: getKey('glmBaseUrl') || process.env.GLM_BASE_URL,
+          apiKey: process.env.GLM_API_KEY || '',
+          baseURL: process.env.GLM_BASE_URL,
         })
         break
       case 'deepseek':
         provider = new DeepSeekProvider({
-          apiKey: getKey('deepseekApiKey') || process.env.DEEPSEEK_API_KEY || '',
-          baseURL: getKey('deepseekBaseUrl') || process.env.DEEPSEEK_BASE_URL,
+          apiKey: process.env.DEEPSEEK_API_KEY || '',
+          baseURL: process.env.DEEPSEEK_BASE_URL,
         })
         break
       default:
@@ -130,17 +142,69 @@ export class ProviderFactory {
   }
 }
 
+const PROVIDER_TYPES: Array<'openai' | 'anthropic' | 'ollama' | 'glm' | 'deepseek'> = [
+  'openai',
+  'anthropic',
+  'glm',
+  'deepseek',
+  'ollama',
+]
+
+function isProviderConfigured(type: 'openai' | 'anthropic' | 'ollama' | 'glm' | 'deepseek'): boolean {
+  switch (type) {
+    case 'openai':
+      return Boolean(process.env.OPENAI_API_KEY)
+    case 'anthropic':
+      return Boolean(process.env.ANTHROPIC_API_KEY)
+    case 'glm':
+      return Boolean(process.env.GLM_API_KEY)
+    case 'deepseek':
+      return Boolean(process.env.DEEPSEEK_API_KEY)
+    case 'ollama':
+      return Boolean(process.env.OLLAMA_BASE_URL || 'http://localhost:11434')
+    default:
+      return false
+  }
+}
+
+function resolveProviderType(): 'openai' | 'anthropic' | 'ollama' | 'glm' | 'deepseek' {
+  const fromEnv = process.env.DEFAULT_PROVIDER as 'openai' | 'anthropic' | 'ollama' | 'glm' | 'deepseek' | undefined
+  if (fromEnv && PROVIDER_TYPES.includes(fromEnv) && isProviderConfigured(fromEnv)) {
+    return fromEnv
+  }
+
+  const detected = PROVIDER_TYPES.find((type) => isProviderConfigured(type))
+  return detected || 'openai'
+}
+
+function resolveProviderModel(type: 'openai' | 'anthropic' | 'ollama' | 'glm' | 'deepseek'): string {
+  const explicit = process.env.DEFAULT_MODEL
+  if (explicit) {
+    return explicit
+  }
+
+  switch (type) {
+    case 'openai':
+      return process.env.OPENAI_MODEL || 'gpt-4o'
+    case 'anthropic':
+      return process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022'
+    case 'glm':
+      return process.env.GLM_MODEL || 'glm-4'
+    case 'deepseek':
+      return process.env.DEEPSEEK_MODEL || 'deepseek-chat'
+    case 'ollama':
+      return process.env.OLLAMA_MODEL || 'llama3.1:8b'
+    default:
+      return 'gpt-4o'
+  }
+}
+
 /**
  * Convenience function to get the default provider
  */
 export function getDefaultProvider(): LLMProvider {
-  const defaultType = (process.env.DEFAULT_PROVIDER || 'anthropic') as
-    | 'openai'
-    | 'anthropic'
-    | 'ollama'
-    | 'glm'
-    | 'deepseek'
-  const defaultModel = process.env.DEFAULT_MODEL || 'claude-3-5-sonnet-20241022'
+  const defaultType = resolveProviderType()
+  const defaultModel = resolveProviderModel(defaultType)
 
   return ProviderFactory.getProvider({
     type: defaultType,
@@ -149,36 +213,13 @@ export function getDefaultProvider(): LLMProvider {
 }
 
 /**
- * Convenience function to get a provider for a specific role
- * Returns provider with role-specific model configuration
+ * Get a unified provider config for all roles from .env
  */
-export async function getRoleProvider(role: string): Promise<{ provider: LLMProvider; model: string; temperature: number; maxTokens: number }> {
-  const { getRoleManager } = await import('../persona/roleManager.js')
-  const roleManager = await getRoleManager()
-
-  const roleInfo = roleManager.getRole(role.toLowerCase())
-  if (roleInfo && roleInfo.modelConfig) {
-    const provider = ProviderFactory.getProvider({
-      type: roleInfo.modelConfig.provider,
-      model: roleInfo.modelConfig.model,
-    })
-
-    return {
-      provider,
-      model: roleInfo.modelConfig.model,
-      temperature: roleInfo.modelConfig.temperature,
-      maxTokens: roleInfo.modelConfig.maxTokens,
-    }
-  }
-
-  // Fallback to default
-  const defaultType = (process.env.DEFAULT_PROVIDER || 'anthropic') as
-    | 'openai'
-    | 'anthropic'
-    | 'ollama'
-    | 'glm'
-    | 'deepseek'
-  const defaultModel = process.env.DEFAULT_MODEL || 'claude-3-5-sonnet-20241022'
+export async function getRoleProvider(_role: string): Promise<{ provider: LLMProvider; model: string; temperature: number; maxTokens: number }> {
+  const defaultType = resolveProviderType()
+  const defaultModel = resolveProviderModel(defaultType)
+  const defaultTemperature = Number(process.env.DEFAULT_TEMPERATURE || '0.7')
+  const defaultMaxTokens = Number(process.env.DEFAULT_MAX_TOKENS || '2000')
 
   const provider = ProviderFactory.getProvider({
     type: defaultType,
@@ -188,7 +229,7 @@ export async function getRoleProvider(role: string): Promise<{ provider: LLMProv
   return {
     provider,
     model: defaultModel,
-    temperature: 0.7,
-    maxTokens: 4096,
+    temperature: Number.isFinite(defaultTemperature) ? defaultTemperature : 0.7,
+    maxTokens: Number.isFinite(defaultMaxTokens) ? defaultMaxTokens : 2000,
   }
 }

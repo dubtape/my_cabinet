@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 type KeyStatus = {
   configured: boolean
@@ -6,16 +6,28 @@ type KeyStatus = {
   value?: string
 }
 
-type KeyStatusResponse = {
-  openai: KeyStatus
-  anthropic: KeyStatus
-  deepseek: KeyStatus
-  glm: KeyStatus
-  ollama: KeyStatus
+type ModelInfo = {
+  id: string
+  name: string
+  provider: string
+  contextLength: number
+}
+
+type SettingsStatusResponse = {
+  keys: {
+    openai: KeyStatus
+    anthropic: KeyStatus
+    deepseek: KeyStatus
+    glm: KeyStatus
+    ollama: KeyStatus
+  }
+  models: ModelInfo[]
+  defaultProvider: string
+  defaultModel: string
 }
 
 export default function Settings() {
-  const [status, setStatus] = useState<KeyStatusResponse | null>(null)
+  const [status, setStatus] = useState<SettingsStatusResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [form, setForm] = useState({
@@ -28,20 +40,29 @@ export default function Settings() {
     deepseekBaseUrl: '',
   })
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const response = await fetch('/api/settings')
-        if (!response.ok) throw new Error('Failed to fetch settings')
-        const data = await response.json()
-        setStatus(data)
-      } catch (error) {
-        console.error('Failed to fetch settings:', error)
-      } finally {
-        setIsLoading(false)
-      }
+  const groupedModels = useMemo(() => {
+    const groups: Record<string, ModelInfo[]> = {}
+    for (const model of status?.models || []) {
+      groups[model.provider] = groups[model.provider] || []
+      groups[model.provider].push(model)
     }
+    return groups
+  }, [status?.models])
 
+  const fetchStatus = async () => {
+    try {
+      const response = await fetch('/api/settings/status')
+      if (!response.ok) throw new Error('Failed to fetch settings status')
+      const data = await response.json()
+      setStatus(data)
+    } catch (error) {
+      console.error('Failed to fetch settings:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
     fetchStatus()
   }, [])
 
@@ -61,8 +82,6 @@ export default function Settings() {
         body: JSON.stringify(payload),
       })
       if (!response.ok) throw new Error('Failed to save settings')
-      const data = await response.json()
-      setStatus(data.keys)
       setForm({
         openaiApiKey: '',
         anthropicApiKey: '',
@@ -72,6 +91,7 @@ export default function Settings() {
         glmBaseUrl: '',
         deepseekBaseUrl: '',
       })
+      await fetchStatus()
       alert('保存成功')
     } catch (error) {
       console.error('Failed to save settings:', error)
@@ -81,125 +101,86 @@ export default function Settings() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-3xl font-bold text-white">系统设置</h2>
-        <p className="mt-2 text-slate-400">配置模型 API Key（仅后端保存，不会在前端显示）</p>
+  const renderStatus = (name: string, item?: KeyStatus) => (
+    <div className="mac-panel p-3 text-sm" key={name}>
+      <div className="font-semibold">{name}</div>
+      <div className="text-xs text-slate-600">
+        {item?.configured ? `已配置 ${item.masked || item.value || ''}` : '未配置'}
       </div>
+    </div>
+  )
 
-      {isLoading ? (
-        <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-12 text-center">
-          <p className="text-slate-400">加载中...</p>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-6">
-          <div className="mb-6 grid gap-4 md:grid-cols-2">
-            {status && (
-              <>
-                <div className="text-sm text-slate-400">
-                  OpenAI: {status.openai.configured ? `已配置 (${status.openai.masked})` : '未配置'}
-                </div>
-                <div className="text-sm text-slate-400">
-                  Anthropic: {status.anthropic.configured ? `已配置 (${status.anthropic.masked})` : '未配置'}
-                </div>
-                <div className="text-sm text-slate-400">
-                  DeepSeek: {status.deepseek.configured ? `已配置 (${status.deepseek.masked})` : '未配置'}
-                </div>
-                <div className="text-sm text-slate-400">
-                  GLM: {status.glm.configured ? `已配置 (${status.glm.masked})` : '未配置'}
-                </div>
-                <div className="text-sm text-slate-400">
-                  Ollama: {status.ollama.configured ? `已配置 (${status.ollama.value || 'default'})` : '未配置'}
-                </div>
-              </>
-            )}
+  return (
+    <div className="mac-desktop min-h-screen p-4 md:p-6">
+      <div className="mac-window mx-auto max-w-5xl overflow-hidden">
+        <div className="mac-titlebar">
+          <div className="mac-titlebar-lights">
+            <span className="mac-light mac-light-red" />
+            <span className="mac-light mac-light-yellow" />
+            <span className="mac-light mac-light-green" />
           </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">OpenAI API Key</label>
-              <input
-                type="password"
-                value={form.openaiApiKey}
-                onChange={(e) => handleChange('openaiApiKey', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="sk-..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">Anthropic API Key</label>
-              <input
-                type="password"
-                value={form.anthropicApiKey}
-                onChange={(e) => handleChange('anthropicApiKey', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="sk-ant-..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">DeepSeek API Key</label>
-              <input
-                type="password"
-                value={form.deepseekApiKey}
-                onChange={(e) => handleChange('deepseekApiKey', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="sk-..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">GLM API Key</label>
-              <input
-                type="password"
-                value={form.glmApiKey}
-                onChange={(e) => handleChange('glmApiKey', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">Ollama Base URL</label>
-              <input
-                type="text"
-                value={form.ollamaBaseUrl}
-                onChange={(e) => handleChange('ollamaBaseUrl', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="http://localhost:11434"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">GLM Base URL</label>
-              <input
-                type="text"
-                value={form.glmBaseUrl}
-                onChange={(e) => handleChange('glmBaseUrl', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="https://..."
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm text-slate-400">DeepSeek Base URL</label>
-              <input
-                type="text"
-                value={form.deepseekBaseUrl}
-                onChange={(e) => handleChange('deepseekBaseUrl', e.target.value)}
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-slate-200"
-                placeholder="https://..."
-              />
-            </div>
-          </div>
-
-          <div className="mt-6 flex justify-end">
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="rounded bg-cyan-500 px-4 py-2 text-white hover:bg-cyan-600 disabled:bg-slate-700 disabled:text-slate-400"
-            >
-              {isSaving ? '保存中...' : '保存设置'}
-            </button>
+          <h1 className="mac-title text-base">模型与密钥设置</h1>
+          <div className="text-xs text-slate-600">
+            默认: {status?.defaultProvider || '-'} / {status?.defaultModel || '-'}
           </div>
         </div>
-      )}
+
+        <div className="mac-window-body space-y-4">
+          {isLoading ? (
+            <div className="mac-panel p-8 text-center text-sm text-slate-500">加载中...</div>
+          ) : (
+            <>
+              <section className="grid gap-3 md:grid-cols-3">
+                {renderStatus('OpenAI', status?.keys.openai)}
+                {renderStatus('Anthropic', status?.keys.anthropic)}
+                {renderStatus('DeepSeek', status?.keys.deepseek)}
+                {renderStatus('GLM', status?.keys.glm)}
+                {renderStatus('Ollama', status?.keys.ollama)}
+              </section>
+
+              <section className="mac-panel p-4">
+                <h2 className="mb-3 text-sm font-semibold">更新配置</h2>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <input type="password" value={form.openaiApiKey} onChange={(e) => handleChange('openaiApiKey', e.target.value)} className="mac-input" placeholder="OpenAI API Key" />
+                  <input type="password" value={form.anthropicApiKey} onChange={(e) => handleChange('anthropicApiKey', e.target.value)} className="mac-input" placeholder="Anthropic API Key" />
+                  <input type="password" value={form.deepseekApiKey} onChange={(e) => handleChange('deepseekApiKey', e.target.value)} className="mac-input" placeholder="DeepSeek API Key" />
+                  <input type="password" value={form.glmApiKey} onChange={(e) => handleChange('glmApiKey', e.target.value)} className="mac-input" placeholder="GLM API Key" />
+                  <input type="text" value={form.ollamaBaseUrl} onChange={(e) => handleChange('ollamaBaseUrl', e.target.value)} className="mac-input" placeholder="Ollama Base URL" />
+                  <input type="text" value={form.glmBaseUrl} onChange={(e) => handleChange('glmBaseUrl', e.target.value)} className="mac-input" placeholder="GLM Base URL" />
+                  <input type="text" value={form.deepseekBaseUrl} onChange={(e) => handleChange('deepseekBaseUrl', e.target.value)} className="mac-input md:col-span-2" placeholder="DeepSeek Base URL" />
+                </div>
+                <div className="mt-3 flex justify-end">
+                  <button onClick={handleSave} disabled={isSaving} className="mac-primary-btn">
+                    {isSaving ? '保存中...' : '保存设置'}
+                  </button>
+                </div>
+              </section>
+
+              <section className="mac-panel p-4">
+                <h2 className="mb-3 text-sm font-semibold">可用模型</h2>
+                {Object.keys(groupedModels).length === 0 ? (
+                  <div className="text-sm text-slate-500">暂无可用模型，请先配置对应 provider 的密钥。</div>
+                ) : (
+                  <div className="space-y-3">
+                    {Object.entries(groupedModels).map(([provider, models]) => (
+                      <div key={provider}>
+                        <div className="mb-1 text-xs font-semibold uppercase text-slate-500">{provider}</div>
+                        <div className="flex flex-wrap gap-2">
+                          {models.map((model) => (
+                            <span key={model.id} className="rounded border border-slate-300 bg-slate-100 px-2 py-1 text-xs">
+                              {model.id}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

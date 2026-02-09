@@ -7,7 +7,6 @@ export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { meetings, updateMeeting, appendMessage, addMeeting } = useMeetingsStore()
-  const [ws, setWs] = useState<WebSocket | null>(null)
   const [isFetching, setIsFetching] = useState(false)
 
   const meeting = meetings.find((m) => m.id === id)
@@ -52,8 +51,6 @@ export default function MeetingDetail() {
         appendMessage(id, data.message)
       }
     }
-
-    setWs(websocket)
 
     return () => {
       websocket.close()

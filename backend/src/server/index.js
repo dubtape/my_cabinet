@@ -2,20 +2,28 @@ import express from 'express'
 import { WebSocketServer } from 'ws'
 import { createServer } from 'http'
 import { config } from 'dotenv'
+import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-
-// Load environment variables
-config()
 
 // Import routes
 import meetingsRouter, { meetings } from '../routes/meetings.js'
 import rolesRouter from '../routes/roles.js'
 import memoryRouter from '../routes/memory.js'
-import settingsRouter from '../routes/settings.js'
+import { continueWithUserResponse } from '../controllers/meetingsController.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+// Load environment variables from root .env first, then cwd .env
+const envCandidates = [
+  path.resolve(process.cwd(), '..', '.env'),
+  path.resolve(process.cwd(), '.env'),
+]
+const envPath = envCandidates.find((candidate) => fs.existsSync(candidate))
+if (envPath) {
+  config({ path: envPath, override: true })
+}
 
 const app = express()
 const server = createServer(app)
@@ -51,7 +59,6 @@ app.get('/health', (req, res) => {
 app.use('/api/meetings', meetingsRouter)
 app.use('/api/roles', rolesRouter)
 app.use('/api/memory', memoryRouter)
-app.use('/api/settings', settingsRouter)
 
 // Serve static files from frontend in production
 if (process.env.NODE_ENV === 'production') {
@@ -121,6 +128,13 @@ wss.on('connection', (ws, req) => {
               })
 
               console.log(`User response added to meeting ${ws.meetingId}`)
+
+              // Continue interaction:
+              // - running meeting => PRIME immediate response
+              // - completed meeting => follow-up discussion + refreshed decision
+              continueWithUserResponse(meeting, meetings, data.response).catch((error) => {
+                console.error(`Failed to continue meeting ${ws.meetingId}:`, error)
+              })
             }
           }
           break
